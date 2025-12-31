@@ -4,6 +4,11 @@ A **PyTorch** implementation of a **GPT-style decoder-only transformer** with a 
 
 No HuggingFace. No pretrained weights. No SentencePiece. Just PyTorch and first principles.
 
+<p align="center">
+  <img src="images/ac971ca3-3ce8-4467-8a33-fe9b1ff61890.png" alt="DIY GPT Machine" width="45%">
+  <img src="images/93fd9029-3c17-42dd-bef0-fcdc79e31924.png" alt="GPT From Scratch" width="45%">
+</p>
+
 ---
 
 ## Table of Contents
