@@ -6,7 +6,6 @@ No HuggingFace. No pretrained weights. No SentencePiece. Just PyTorch and first 
 
 <p align="center">
   <img src="image1.png" alt="DIY GPT Machine" width="45%">
-  <img src="image2.png" alt="GPT From Scratch" width="45%">
 </p>
 
 ---
