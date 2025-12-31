@@ -1,129 +1,315 @@
-<p align="center">
-  <h1 align="center">GBPET</h1>
-  <p align="center">
-    <strong>GPT + BPE, from scratch, in PyTorch</strong>
-  </p>
-  <p align="center">
-    A ~20M parameter transformer language model trained on Charles Dickens.<br>
-    No HuggingFace. No pretrained weights. No external tokenizers.<br>
-    <em>Just PyTorch and first principles.</em>
-  </p>
-</p>
+# GBPET: GPT with Byte Pair Encoding Tokenizer
 
-<p align="center">
-  <img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python">
-  <img src="https://img.shields.io/badge/pytorch-2.0+-ee4c2c.svg" alt="PyTorch">
-  <img src="https://img.shields.io/badge/parameters-~20M-green.svg" alt="Parameters">
-  <img src="https://img.shields.io/badge/license-MIT-lightgrey.svg" alt="License">
-</p>
+A **PyTorch** implementation of a **GPT-style decoder-only transformer** with a custom **Byte Pair Encoding tokenizer**, built entirely **from scratch** for educational purposes. Trained on 15 million characters of Charles Dickens novels.
 
-## What is this?
+No HuggingFace. No pretrained weights. No SentencePiece. Just PyTorch and first principles.
 
-I built a GPT-style language model **completely from scratch** to understand how modern LLMs actually work under the hood:
+---
 
-- **Custom BPE tokenizer** — the same algorithm OpenAI uses, implemented from the original paper
-- **Decoder-only transformer** — multi-head attention, feed-forward blocks, the whole thing
-- **Trained on 15M characters** of Dickens novels (public domain)
-- **Generates coherent Victorian prose** after a few hours of training
+## Table of Contents
 
-No magic. No black boxes. Every line of code written to learn.
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Technical Background](#technical-background)
+- [Project Structure](#project-structure)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Training Process](#training-process)
+- [Results](#results)
+- [Limitations](#limitations)
+- [Future Improvements](#future-improvements)
+- [References](#references)
+- [License](#license)
 
-## Quick Start
+---
 
-```bash
-git clone https://github.com/franciszekparma/GBPET.git
-cd GBPET/GBPET
-pip install torch numpy tqdm
-python transformer.py
-```
+## Overview
 
-## Sample Output
+GPT (Generative Pre-trained Transformer) is a decoder-only transformer architecture that generates text autoregressively by predicting the next token given all previous tokens. This implementation demonstrates the core concepts behind modern large language models without relying on pre-built NLP libraries.
 
-> **TODO**: Add real generated samples from the trained model
+This project includes:
 
-```bash
-# Generate text from checkpoint:
-# Set ONLY_GENERATE=True in utils.py, then:
-python transformer.py
-```
+- **Custom BPE tokenizer** implementing the original algorithm from Sennrich et al. (2016)
+- **Decoder-only transformer** with multi-head self-attention and causal masking
+- **Dual tokenization modes** switchable between BPE (subword) and character-level
+- **Bigram baseline model** for performance comparison
+- **Comprehensive checkpointing** preserving model, optimizer, scheduler, and tokenizer state
 
-## Model at a Glance
+---
 
-```
-┌─────────────────────────────────────┐
-│           GBPET Model               │
-├─────────────────────────────────────┤
-│  Parameters:      ~20M              │
-│  Embedding dim:   512               │
-│  Attention heads: 8                 │
-│  Blocks:          8                 │
-│  Context length:  256 tokens        │
-│  Vocab size:      2048 (BPE)        │
-└─────────────────────────────────────┘
-```
+## Architecture
 
-**Architecture**: Pre-LayerNorm (GPT-2 style) with learned positional embeddings and GELU activations.
+| Parameter | Value |
+|-----------|-------|
+| Total Parameters | ~20M |
+| Embedding Dimension | 512 |
+| Attention Heads | 8 |
+| Transformer Blocks | 8 |
+| Context Length | 256 tokens |
+| Vocabulary Size | 2048 (BPE) / ~88 (char) |
+| Feed-Forward Dimension | 2048 |
+| Dropout | 0.5 |
 
-## How the BPE Tokenizer Works
+The model uses **Pre-LayerNorm** (GPT-2 style) where normalization is applied before each sub-layer, **learned positional embeddings**, and **GELU activations**.
 
-The tokenizer learns subword units by iteratively merging the most frequent character pairs:
+### Architecture Diagram
 
 ```
-Iteration 0:    ['T', 'h', 'e', '</w>', 't', 'h', 'e', '</w>']
-Iteration 127:  ['The</w>', 'the</w>']
-...
-Iteration 1960: 2048 tokens learned
+Input Token IDs
+       │
+       ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Token Embedding + Positional Embedding                      │
+│  nn.Embedding(2048, 512) + nn.Embedding(256, 512)            │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+╔══════════════════════════════════════════════════════════════╗
+║                  TRANSFORMER BLOCK (×8)                      ║
+║                                                              ║
+║    LayerNorm → Multi-Head Attention (8 heads) → + Residual   ║
+║                           │                                  ║
+║    LayerNorm → FeedForward (512→2048→512, GELU) → + Residual ║
+║                                                              ║
+╚══════════════════════════╪═══════════════════════════════════╝
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│              LayerNorm → Linear Head (512 → 2048)            │
+└──────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+                     Output Logits
 ```
 
-Starting from ~88 characters, it builds up to 2048 subword tokens — capturing common words, word pieces, and punctuation patterns.
+---
 
-## Training
+## Technical Background
 
-**Hardware**:
-| Mode | GPU |
-|------|-----|
-| BPE (subword) | RTX 5090 (rented) |
-| Character-level | RTX 4090 (rented) |
+### Byte Pair Encoding
 
-**Config**:
-- AdamW optimizer with linear warmup + cosine decay
-- Learning rate: 6e-4 → 1e-6
-- Batch size: 256
-- Dropout: 0.5
-- ~3-4 hours total training time
+BPE is a subword tokenization algorithm that iteratively merges the most frequent adjacent character pairs:
+
+1. Initialize vocabulary with all unique characters + `</w>` end-of-word marker
+2. Count frequency of all adjacent token pairs in corpus
+3. Merge most frequent pair into a new token
+4. Repeat until target vocabulary size (2048) is reached
+
+```
+Iteration 0:    ['T', 'h', 'e', '</w>', 'c', 'a', 't', '</w>']
+Iteration 50:   ['Th', 'e</w>', 'cat</w>']
+Iteration 1960: 2048 learned subword tokens
+```
+
+### Causal Self-Attention
+
+Each position can only attend to previous positions, enforced by a lower-triangular mask:
+
+```python
+attn = (q @ k.transpose(-2, -1)) / math.sqrt(head_size)
+attn = attn.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
+attn = F.softmax(attn, dim=-1)
+out = attn @ v
+```
+
+### Autoregressive Generation
+
+```python
+for _ in range(max_tokens):
+    logits = model(context[:, -context_len:])
+    probs = F.softmax(logits[:, -1, :], dim=-1)
+    next_token = torch.multinomial(probs, num_samples=1)
+    context = torch.cat([context, next_token], dim=1)
+```
+
+---
 
 ## Project Structure
 
 ```
 GBPET/
 ├── GBPET/
-│   ├── utils.py            # All hyperparameters
-│   ├── data_preparation.py # BPE tokenizer
-│   ├── transformer.py      # Model + training
-│   └── bigram.py           # Baseline
+│   ├── utils.py            # Hyperparameters and configuration
+│   ├── data_preparation.py # BPE tokenizer and data loading
+│   ├── transformer.py      # Model architecture and training
+│   └── bigram.py           # Baseline model
 ├── data/
-│   └── dickens_corpus.txt  # Training data
-├── checkpoints/
-└── samples/
+│   └── dickens_corpus.txt  # Training corpus (~15M characters)
+├── checkpoints/            # Saved model states
+├── samples/                # Generated text samples
+├── LICENSE
+└── README.md
 ```
 
-## Why Build This?
+| File | Description |
+|------|-------------|
+| `utils.py` | All hyperparameters, paths, device config, seed utilities |
+| `data_preparation.py` | `BytePairEncoding` class with `train()`, `encode()`, `decode()`, `clean_decode()` |
+| `transformer.py` | `Head`, `MultiHeadAttention`, `FeedForward`, `Block`, `Language_Model` classes |
+| `bigram.py` | Simple next-token baseline for comparison |
 
-Because using `from transformers import GPT2` doesn't teach you anything.
+---
 
-Building from scratch means understanding:
-- How attention actually computes similarity between tokens
-- Why we need positional encodings
-- How BPE compression works
-- What makes training stable (or unstable)
+## Installation
+
+```bash
+git clone https://github.com/franciszekparma/GBPET.git
+cd GBPET
+pip install torch numpy tqdm
+```
+
+### Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `torch` | Neural network framework |
+| `numpy` | Numerical operations |
+| `tqdm` | Progress bars |
+
+---
+
+## Usage
+
+### Training
+
+```bash
+cd GBPET
+python transformer.py
+```
+
+### Generate Text Only
+
+Set in `utils.py`:
+```python
+ONLY_GENERATE = True
+TRS_LOAD_CHECKPOINT = True
+```
+
+Then run:
+```bash
+python transformer.py
+```
+
+### Run Baseline
+
+```bash
+python bigram.py
+```
+
+---
+
+## Configuration
+
+Hyperparameters in `utils.py`:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `EMB_DIM` | 512 | Embedding dimensions |
+| `N_HEADS` | 8 | Number of attention heads |
+| `N_BLOCKS` | 8 | Number of transformer blocks |
+| `CONTEXT_LEN` | 256 | Maximum sequence length |
+| `TARGET_VOCAB_SIZE` | 2048 | BPE vocabulary size |
+| `BATCH_SIZE` | 256 | Training batch size |
+| `LR_TRS` | 6e-4 | Peak learning rate |
+| `DP_P` | 0.5 | Dropout probability |
+| `TRS_TRAIN_EPOCHS` | 128 | Number of training epochs |
+| `WARMUP_STEPS` | N_STEPS // 20 | Linear warmup steps |
+| `USE_BYTE_PAIR` | True | Toggle BPE vs character-level |
+
+---
+
+## Training Process
+
+### Hardware
+
+| Tokenization Mode | GPU | Provider |
+|-------------------|-----|----------|
+| BPE (subword) | NVIDIA RTX 5090 | RunPod (rented) |
+| Character-level | NVIDIA RTX 4090 | RunPod (rented) |
+
+### Learning Rate Schedule
+
+Linear warmup followed by cosine annealing:
+
+```
+LR
+ │
+6e-4 ┤       ╭────────────╮
+     │      ╱              ╲
+     │     ╱                ╲
+1e-6 ┤────╱                  ╲────
+     └────┬────────┬─────────┬────→ Steps
+          0    ~1.6k      ~33k
+        Warmup   Cosine Decay
+```
+
+### Training Time
+
+| Component | Duration |
+|-----------|----------|
+| BPE vocabulary training | ~3-4 hours (one-time, cached) |
+| Model training per epoch | ~100-120 seconds |
+| Full training run | ~3-4 hours |
+
+---
+
+## Results
+
+### Sample Output
+
+> **TODO**: Add generated samples from trained model
+
+```bash
+# Generate with:
+# Set ONLY_GENERATE=True in utils.py
+python transformer.py
+```
+
+### Loss Metrics
+
+| Metric | BPE Model |
+|--------|-----------|
+| Final Train Loss | ~2.5 |
+| Final Val Loss | ~3.3 |
+
+---
+
+## Limitations
+
+| Limitation | Description |
+|------------|-------------|
+| BPE training time | Standard algorithm is O(n × vocab_size), takes hours |
+| Fixed context | 256 tokens maximum, no sliding window |
+| Single domain | Trained only on Dickens, limited generalization |
+| Basic sampling | Temperature only, no top-p/nucleus sampling |
+| O(n²) attention | Memory scales quadratically with sequence length |
+
+---
+
+## Future Improvements
+
+- [ ] Optimize BPE with word frequency method
+- [ ] Implement Flash Attention for longer contexts
+- [ ] Add top-p (nucleus) sampling
+- [ ] Implement KV-cache for faster inference
+- [ ] Add Rotary Positional Embeddings (RoPE)
+- [ ] Multi-corpus training (other Victorian authors)
+
+---
 
 ## References
 
-- [Attention Is All You Need](https://arxiv.org/abs/1706.03762) (Vaswani et al., 2017)
-- [GPT-1 Paper](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf) (Radford et al., 2018)
-- [BPE Paper](https://arxiv.org/abs/1508.07909) (Sennrich et al., 2016)
-- [minGPT](https://github.com/karpathy/minGPT) by Andrej Karpathy
+1. Vaswani et al. (2017). [Attention Is All You Need](https://arxiv.org/abs/1706.03762)
+2. Radford et al. (2018). [Improving Language Understanding by Generative Pre-Training](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf)
+3. Radford et al. (2019). [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
+4. Sennrich et al. (2016). [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909)
+5. Karpathy, A. [minGPT](https://github.com/karpathy/minGPT)
+
+---
 
 ## License
 
-MIT
+This project is licensed under the MIT License.
+
+©'franciszekparma'
