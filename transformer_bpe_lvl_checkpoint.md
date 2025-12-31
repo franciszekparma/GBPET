@@ -1,4 +1,4 @@
-## 📦 Model Checkpoint
+## 📦 BPE Transformer Model Checkpoint
 
 Pre-trained BPE Transformer weights ready for inference or fine-tuning.
 
