@@ -142,6 +142,7 @@ GBPET/
 │   └── dickens_corpus.txt  # Training corpus (~15M characters)
 ├── checkpoints/            # Saved model states
 ├── samples/                # Generated text samples
+├── images/
 ├── LICENSE
 └── README.md
 ```
