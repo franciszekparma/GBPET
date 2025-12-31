@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">🔤 GBPET</h1>
+  <h1 align="center">GBPET</h1>
   <p align="center">
     <strong>GPT + BPE, from scratch, in PyTorch</strong>
   </p>
