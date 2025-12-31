@@ -5,7 +5,7 @@ A **PyTorch** implementation of a **GPT-style decoder-only transformer** with a 
 No HuggingFace. No pretrained weights. No SentencePiece. Just PyTorch and first principles.
 
 <p align="center">
-  <img src="pixel_art.png" alt="Pixel Art Oppener" width="45%">
+  <img src="pixel_art.png" alt="Pixel Art Oppener" width="80%">
 </p>
 
 ---
