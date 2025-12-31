@@ -270,8 +270,8 @@ LR
 "See where you have said so?"
 ```
 
+You can generate by:
 ```bash
-# Generate with:
 # Set ONLY_GENERATE=True in utils.py
 python transformer.py
 ```
