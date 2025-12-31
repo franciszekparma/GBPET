@@ -15,6 +15,7 @@ No external ML libraries. No HuggingFace. No pretrained models. No SentencePiece
 - [Installation](#installation)
 - [Usage](#usage)
 - [Training](#training)
+- [Hardware](#hardware)
 - [Results](#results)
 - [Sample Output](#sample-output)
 - [Technical Details](#technical-details)
@@ -28,9 +29,11 @@ No external ML libraries. No HuggingFace. No pretrained models. No SentencePiece
 
 GBPET implements a GPT-style autoregressive language model that generates coherent, period-appropriate prose in the style of Charles Dickens. The project demonstrates a complete understanding of modern language model architecture by implementing every component from scratch:
 
-- **Custom BPE tokenizer** with an optimized training algorithm that reduces vocabulary construction time from 3.5 hours to approximately 5 minutes
+- **Custom BPE tokenizer** implementing the original algorithm from Sennrich et al. (2016)
 - **Decoder-only transformer** with multi-head self-attention, feed-forward networks, and learned positional embeddings
-- **Checkpoint system** that preserves model weights, optimizer state, scheduler state, and the complete BPE vocabulary
+- **Dual tokenization modes**: Switch between BPE (subword) and character-level tokenization via a single flag
+- **Bigram baseline model** for performance comparison
+- **Checkpoint system** that preserves model weights, optimizer state, scheduler state, and the complete tokenizer vocabulary
 
 The model is trained on a corpus of Dickens novels (public domain texts), totaling approximately 15 million characters.
 
@@ -44,7 +47,9 @@ The model is trained on a corpus of Dickens novels (public domain texts), totali
 | Attention Heads | 8 |
 | Transformer Blocks | 8 |
 | Context Length | 256 tokens |
-| Vocabulary Size | 2048 |
+| Vocabulary Size | 2048 (BPE) / ~88 (char-level) |
+| Feed-Forward Dimension | 2048 (4 × emb_dim) |
+| Dropout | 0.5 |
 | Total Parameters | ~20M |
 
 ### Architecture Diagram
@@ -54,18 +59,23 @@ Input Token IDs
        │
        ▼
 ┌──────────────────┐
-│ Token Embedding  │ nn.Embedding(2048, 512)
+│ Token Embedding  │  nn.Embedding(vocab_size, 512)
 └────────┬─────────┘
          │
          ▼
 ┌──────────────────┐
-│  Positional      │ nn.Embedding(256, 512)
-│  Embedding       │ (learned, not sinusoidal)
+│   Positional     │  nn.Embedding(256, 512)
+│   Embedding      │  (learned, not sinusoidal)
 └────────┬─────────┘
          │
          ▼
 ┌──────────────────────────────────────────┐
 │         Transformer Block (×8)           │
+│  ┌────────────────────────────────────┐  │
+│  │         LayerNorm (Pre-Norm)       │  │
+│  └────────────────┬───────────────────┘  │
+│                   │                      │
+│                   ▼                      │
 │  ┌────────────────────────────────────┐  │
 │  │    Multi-Head Self-Attention       │  │
 │  │    (8 heads, causal masking)       │  │
@@ -73,7 +83,7 @@ Input Token IDs
 │                   │ + Residual           │
 │                   ▼                      │
 │  ┌────────────────────────────────────┐  │
-│  │         LayerNorm                  │  │
+│  │         LayerNorm (Pre-Norm)       │  │
 │  └────────────────┬───────────────────┘  │
 │                   │                      │
 │                   ▼                      │
@@ -83,9 +93,6 @@ Input Token IDs
 │  └────────────────┬───────────────────┘  │
 │                   │ + Residual           │
 │                   ▼                      │
-│  ┌────────────────────────────────────┐  │
-│  │         LayerNorm                  │  │
-│  └────────────────────────────────────┘  │
 └──────────────────────────────────────────┘
          │
          ▼
@@ -95,45 +102,57 @@ Input Token IDs
          │
          ▼
 ┌──────────────────┐
-│  Linear Head     │ (512 → 2048)
+│  Linear Head     │  (512 → vocab_size)
 └────────┬─────────┘
          │
          ▼
    Output Logits
 ```
 
+The architecture follows the **Pre-Norm** convention (GPT-2 style): LayerNorm is applied *before* each sub-layer (attention, FFN), rather than after. This improves training stability.
+
 ---
 
 ## Tokenization System
 
-The BPE tokenizer is implemented entirely from scratch, following the original algorithm with significant optimizations.
+The project supports two tokenization modes, controlled by the `USE_BYTE_PAIR` flag in `utils.py`:
 
-### Algorithm
+### Byte Pair Encoding (BPE)
+
+The BPE tokenizer is implemented entirely from scratch, following the original algorithm.
+
+**Algorithm:**
 
 1. **Corpus Preprocessing**: Text is split into words at spaces. Punctuation and special characters (`\n`, `\t`, `\r`) are treated as separate tokens. Each word ends with a special `</w>` end-of-word marker.
 
 2. **Vocabulary Initialization**: The initial vocabulary consists of all unique characters in the corpus plus `</unk>` for unknown tokens (approximately 88 base tokens).
 
 3. **Merge Learning**: The algorithm iteratively:
-   - Finds the most frequent adjacent token pair across the corpus
+   - Counts all adjacent token pairs across the corpus
+   - Finds the most frequent pair
    - Merges them into a new token
-   - Adds the new token to the vocabulary
+   - Updates the corpus with the merged token
    - Repeats until `TARGET_VOCAB_SIZE` (2048) is reached
 
 4. **Encoding**: To encode text, it first tokenizes into characters with `</w>` markers, then applies all learned merges in order. Each token is mapped to an integer ID via the `st_2_i` dictionary.
 
 5. **Decoding**: Integer IDs are mapped back to tokens via the `i_2_st` dictionary, concatenated, and `</w>` is replaced with spaces.
 
-### Training Time
+**Post-Processing (`clean_decode`):**
 
-The BPE training iterates over the full corpus to count pair frequencies at each merge step. For the Dickens corpus (~3.5 million word occurrences), this takes approximately 3-4 hours on standard hardware. The encoded corpus is saved to checkpoint, so this only needs to run once.
-
-### Post-Processing
-
-The `clean_decode()` function handles spacing artifacts:
-- Fixes contractions: `don ' t` → `don't`
+The `clean_decode()` method handles spacing artifacts after decoding:
+- Fixes contractions: `don ' t` → `don't`, `I ' m` → `I'm`
 - Handles punctuation spacing: removes spaces before periods, commas, etc.
-- Preserves literary conventions: `word -- word` (em-dash representation)
+- Fixes quotation marks and apostrophes
+- Normalizes multiple spaces
+- Preserves literary conventions like em-dashes
+
+### Character-Level Tokenization
+
+When `USE_BYTE_PAIR = False`, the model uses simple character-level tokenization:
+- Each unique character in the corpus becomes a token
+- Vocabulary size is approximately 88 tokens
+- Simpler but requires longer sequences to represent the same text
 
 ---
 
@@ -143,22 +162,22 @@ The `clean_decode()` function handles spacing artifacts:
 GBPET/
 ├── utils.py              # Hyperparameters and configuration
 ├── data_preparation.py   # BPE tokenizer class and data loading
-├── transformer.py        # Model architecture and training loop
-├── encode_corpus.py      # Standalone fast BPE encoder
-├── encoded_corpus.pt     # Pre-encoded corpus with BPE vocabulary
-├── transformer_checkpoint.pt  # Model checkpoint
+├── transformer.py        # Transformer model and training loop
+├── bigram.py             # Bigram baseline model
+├── transformer_checkpoint.pt   # Model checkpoint (generated)
+├── bigram_checkpoint.pt        # Bigram checkpoint (generated)
 └── data/
-    └── dickens_corpus.txt    # Training corpus (~15M characters)
+    └── dickens_corpus.txt      # Training corpus (~15M characters)
 ```
 
 ### File Descriptions
 
 | File | Description |
 |------|-------------|
-| `utils.py` | Defines all hyperparameters: `EMB_DIM`, `N_HEADS`, `N_BLOCKS`, `CONTEXT_LEN`, `VOCAB_SIZE`, `TARGET_VOCAB_SIZE`, learning rate, batch size, dropout rate, and random seeds for reproducibility. |
-| `data_preparation.py` | Contains the `BytePairEncoding` class with methods for training the tokenizer, encoding text, decoding tokens, and the optimized word-frequency training algorithm. Also handles train/validation splitting. |
-| `transformer.py` | Implements `MultiHeadAttention`, `FeedForward`, `TransformerBlock`, and `Language_Model` classes. Contains the training loop with checkpointing and text generation with multinomial sampling. |
-| `encode_corpus.py` | Standalone script for BPE training. Useful for pre-computing the vocabulary and encoded corpus once, then loading from checkpoint for faster model training iterations. |
+| `utils.py` | Central configuration file. Defines all hyperparameters: `EMB_DIM`, `N_HEADS`, `N_BLOCKS`, `CONTEXT_LEN`, `VOCAB_SIZE`, learning rate, batch size, dropout rate, checkpoint paths, and random seeds. Toggle `USE_BYTE_PAIR` to switch tokenization modes. |
+| `data_preparation.py` | Contains the `BytePairEncoding` class with `train()`, `encode()`, `decode()`, and `clean_decode()` methods. Also implements `Sample_Batches` for train/val data loading. Handles both BPE and character-level tokenization based on config. |
+| `transformer.py` | Implements `Head`, `MultiHeadAttention`, `FeedForward`, `Block`, and `Language_Model` classes. Contains the training loop with warmup + cosine annealing LR schedule, gradient clipping, and checkpointing. Includes real-time text generation display. |
+| `bigram.py` | Simple bigram language model (`Bigram_LM`) for baseline comparison. Uses an embedding table where each token directly predicts the next token distribution. |
 
 ---
 
@@ -191,58 +210,86 @@ pip install torch --index-url https://download.pytorch.org/whl/cu118
 
 ## Usage
 
-### Training from Scratch
+### Configuration
+
+Edit `utils.py` to configure the model:
+
+```python
+# Tokenization mode
+USE_BYTE_PAIR = True          # True for BPE, False for character-level
+
+# Checkpoint settings
+TRS_LOAD_CHECKPOINT = False   # Load existing checkpoint
+TRS_SAVE_CHECKPOINT = True    # Save checkpoints during training
+LOAD_BPE_ONLY = False         # Load only BPE vocab (train fresh model)
+
+# Generation settings
+ONLY_GENERATE = False         # Skip training, only generate
+ALWAYS_GENERATE = True        # Generate after training without prompt
+```
+
+### Training the Transformer
 
 ```bash
 python transformer.py
 ```
 
 This will:
-1. Load and tokenize the Dickens corpus (or load from checkpoint if available)
-2. Train the BPE tokenizer (or load from checkpoint)
-3. Train the transformer model
-4. Save checkpoints periodically
+1. Load the Dickens corpus from `data/dickens_corpus.txt`
+2. Train the BPE tokenizer (or load from checkpoint if available)
+3. Encode the corpus
+4. Train the transformer model with warmup + cosine annealing
+5. Save checkpoints when validation loss improves
+6. Generate sample text after training
 
-### Using Pre-encoded Corpus
-
-If you only want to train the model without re-running BPE:
+### Training the Bigram Baseline
 
 ```bash
-# First, encode the corpus once
-python encode_corpus.py
+python bigram.py
+```
 
-# Then train the model (will load from encoded_corpus.pt)
+### Generation Only
+
+Set `ONLY_GENERATE = True` in `utils.py`, then:
+```bash
 python transformer.py
 ```
 
-### Generating Text
-
-After training, the model generates sample text automatically. To generate manually:
+### Loading from Checkpoint
 
 ```python
-from transformer import Language_Model, generate
-from data_preparation import BPE
 import torch
+from data_preparation import BytePairEncoding
+from transformer import Language_Model
+from utils import DEVICE
 
 # Load checkpoint
-checkpoint = torch.load('transformer_checkpoint.pt')
+checkpoint = torch.load('transformer_checkpoint.pt', map_location=DEVICE)
 
-# Restore BPE
-bpe = BytePairEncoding.__new__(BytePairEncoding)
-bpe.merges = checkpoint['bpe_merges']
-bpe.st_2_i = checkpoint['st_2_i']
-bpe.i_2_st = checkpoint['i_2_st']
+# Restore BPE tokenizer
+BPE = BytePairEncoding.__new__(BytePairEncoding)
+BPE.load_checkpoint(
+    checkpoint['bpe_merges'],
+    checkpoint['bpe_st_2_i'],
+    checkpoint['bpe_i_2_st']
+)
 
 # Load model
-model = Language_Model()
+model = Language_Model(
+    vocab_size=checkpoint['vocab_size'],
+    emb_dim=checkpoint['emb_dim'],
+    context_len=checkpoint['context_len'],
+    n_heads=checkpoint['n_heads'],
+    n_blocks=checkpoint['n_blocks']
+)
 model.load_state_dict(checkpoint['model_state_dict'])
+model.to(DEVICE)
 model.eval()
 
 # Generate
 prompt = "It was the best of times"
-tokens = torch.tensor([bpe.encode(prompt)], dtype=torch.long)
-output = model.generate(tokens, max_new_tokens=200)
-print(bpe.clean_decode(output[0].tolist()))
+tokens = torch.tensor([BPE.encode(prompt)], dtype=torch.long, device=DEVICE)
+model.generate(tokens, max_new_tokens=500)
 ```
 
 ---
@@ -254,48 +301,63 @@ print(bpe.clean_decode(output[0].tolist()))
 | Parameter | Value |
 |-----------|-------|
 | Optimizer | AdamW |
-| Learning Rate | 6e-4 to 1e-3 |
-| Weight Decay | 0.1 |
+| Learning Rate | 6e-4 (peak) |
+| LR Schedule | Linear Warmup → Cosine Annealing |
+| Warmup Steps | 5% of total steps (1,638 steps) |
+| Min LR | 1e-6 |
 | Batch Size | 256 |
 | Gradient Clipping | max_norm=1.0 |
-| Dropout | 0.2 |
-| LR Scheduler | ReduceLROnPlateau (factor=0.5, patience=5) |
+| Dropout | 0.5 |
+| Training Epochs | 128 |
+| Batches per Epoch | 256 |
+| Total Steps | 32,768 |
+| Train/Val Split | 80% / 20% |
 
-### Training Loop
+### Learning Rate Schedule
+
+The training uses a two-phase learning rate schedule via `SequentialLR`:
+
+1. **Linear Warmup** (`LinearLR`): LR increases from 0.01 × base_lr to base_lr over the first 1,638 steps (5% of training)
+2. **Cosine Annealing** (`CosineAnnealingLR`): LR decreases from base_lr to 1e-6 following a cosine curve
 
 ```python
-for epoch in range(MAX_EPOCHS):
-    for batch in dataloader:
-        # Forward pass
-        logits, loss = model(xb, yb)
-        
-        # Backward pass
-        optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
-    
-    # Validation
-    val_loss = evaluate(model, val_data)
-    scheduler.step(val_loss)
-    
-    # Checkpoint
-    save_checkpoint(model, optimizer, scheduler, bpe)
+warmup_lrs = LinearLR(optimizer, start_factor=0.01, total_iters=WARMUP_STEPS)
+cosine_lrs = CosineAnnealingLR(optimizer, T_max=N_STEPS-WARMUP_STEPS, eta_min=1e-6)
+scheduler = SequentialLR(optimizer, [warmup_lrs, cosine_lrs], milestones=[WARMUP_STEPS])
 ```
 
 ### Checkpoint Contents
 
 The checkpoint saves:
-- `model_state_dict`: Model weights
-- `optimizer_state_dict`: Optimizer state (momentum, etc.)
-- `scheduler_state_dict`: LR scheduler state
-- `bpe_merges`: List of learned BPE merges
-- `st_2_i`: String-to-index vocabulary mapping
-- `i_2_st`: Index-to-string vocabulary mapping
-- `encoded_data`: Pre-encoded training corpus
-- `epoch`: Current training epoch
-- `train_loss`: Last training loss
-- `val_loss`: Last validation loss
+
+| Key | Description |
+|-----|-------------|
+| `model_state_dict` | Model weights |
+| `optimizer_state_dict` | Optimizer state (momentum, etc.) |
+| `scheduler_state_dict` | LR scheduler state |
+| `encoded_data` | Pre-encoded training corpus |
+| `train_data` | Training split tensor |
+| `val_data` | Validation split tensor |
+| `epoch` | Current training epoch |
+| `best_val_loss` | Best validation loss achieved |
+| `train_loss` | Last training loss |
+| `vocab_size`, `emb_dim`, `context_len`, `n_heads`, `n_blocks` | Architecture config |
+| `use_byte_pair` | Tokenization mode flag |
+| `bpe_merges`, `bpe_st_2_i`, `bpe_i_2_st` | BPE vocabulary (if BPE mode) |
+| `char_st_2_i`, `char_i_2_st` | Character vocabulary (if char mode) |
+
+---
+
+## Hardware
+
+The model was trained on rented cloud GPUs:
+
+| Tokenization Mode | GPU | Notes |
+|-------------------|-----|-------|
+| **BPE (Token-level)** | NVIDIA RTX 5090 | Subword tokenization with 2048 vocab |
+| **Character-level** | NVIDIA RTX 4090 | ~88 character vocabulary |
+
+BPE training (vocabulary construction) takes approximately 3-4 hours on CPU as it iterates over the full corpus at each merge step. The encoded corpus is cached to checkpoint, so this only runs once.
 
 ---
 
@@ -307,19 +369,16 @@ The checkpoint saves:
 |--------|-------|
 | Training Loss | ~2.5 - 3.0 |
 | Validation Loss | ~3.3 - 3.5 |
-| Equivalent Character-Level Loss | ~1.0 - 1.2 |
 
-The character-level equivalent loss is computed by dividing the BPE token loss by the average characters per token ratio.
+### Bigram Baseline
 
-### Training Curve
-
-The model typically converges after 50-100 epochs on GPU. The learning rate scheduler automatically reduces the learning rate when validation loss plateaus.
+The bigram model provides a baseline for comparison. It uses a simple embedding table where each token directly predicts the probability distribution over the next token, without any context beyond the current token.
 
 ---
 
 ## Sample Output
 
-After training, the model generates coherent Dickens-style prose:
+After training, the model generates coherent Dickens-style prose. The `generate()` method clears the terminal and displays text in real-time as tokens are generated:
 
 ```
 It was the beginning of a new life for him, and he had no idea what to 
@@ -339,7 +398,7 @@ The model captures:
 - Victorian prose style and sentence structure
 - Period-appropriate vocabulary
 - Dialogue formatting conventions
-- Paragraph transitions
+- Paragraph transitions and narrative flow
 
 ---
 
@@ -347,68 +406,102 @@ The model captures:
 
 ### Attention Mechanism
 
-The multi-head self-attention uses scaled dot-product attention with causal masking:
+Each attention head computes scaled dot-product attention with causal masking:
 
 ```python
-# Scaled dot-product attention
-attn_weights = (Q @ K.transpose(-2, -1)) / math.sqrt(d_k)
+class Head(nn.Module):
+    def __init__(self, emb_dim, head_size, dp_p):
+        self.key = nn.Linear(emb_dim, head_size, bias=False)
+        self.query = nn.Linear(emb_dim, head_size, bias=False)
+        self.value = nn.Linear(emb_dim, head_size, bias=False)
+        self.register_buffer('tril', torch.tril(torch.ones(CONTEXT_LEN, CONTEXT_LEN)))
+        self.dropout = nn.Dropout(dp_p)
+        
+    def forward(self, X):
+        k, q, v = self.key(X), self.query(X), self.value(X)
+        
+        wei = q @ k.transpose(-2, -1) * self.head_size**-0.5
+        wei = wei + torch.where(self.tril[:X.shape[1], :X.shape[1]] == 0, float('-inf'), 0.0)
+        wei = F.softmax(wei, dim=-1)
+        wei = self.dropout(wei)
+        
+        return wei @ v
+```
 
-# Causal mask (lower triangular)
-mask = torch.tril(torch.ones(seq_len, seq_len))
-attn_weights = attn_weights.masked_fill(mask == 0, float('-inf'))
+### Multi-Head Attention
 
-# Softmax and value aggregation
-attn_weights = F.softmax(attn_weights, dim=-1)
-attn_weights = self.dropout(attn_weights)
-output = attn_weights @ V
+Multiple heads are computed in parallel and concatenated:
+
+```python
+class MultiHeadAttention(nn.Module):
+    def __init__(self, n_heads, head_size, emb_dim, dp_p):
+        self.heads = nn.ModuleList([Head(emb_dim, head_size) for _ in range(n_heads)])
+        self.proj = nn.Linear(emb_dim, emb_dim)
+        self.dropout = nn.Dropout(dp_p)
+        
+    def forward(self, X):
+        out = torch.cat([h(X) for h in self.heads], dim=-1)
+        return self.dropout(self.proj(out))
 ```
 
 ### Feed-Forward Network
 
-Each transformer block contains a position-wise feed-forward network with GELU activation:
+Position-wise feed-forward network with GELU activation:
 
 ```python
 class FeedForward(nn.Module):
-    def __init__(self, emb_dim):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(emb_dim, 4 * emb_dim),
+    def __init__(self, emb_dim, dp_p):
+        self.mlp = nn.Sequential(
+            nn.Linear(emb_dim, emb_dim * 4),
             nn.GELU(),
-            nn.Linear(4 * emb_dim, emb_dim),
-            nn.Dropout(DROPOUT)
+            nn.Dropout(dp_p),
+            nn.Linear(emb_dim * 4, emb_dim)
         )
 ```
 
-### Weight Initialization
+### Transformer Block (Pre-Norm)
 
-Weights are initialized using a truncated normal distribution with standard deviation 0.02, following GPT-2 conventions.
+```python
+class Block(nn.Module):
+    def forward(self, X):
+        out = X + self.sa_heads(self.ln1(X))   # Pre-norm: LN before attention
+        out = out + self.ffd(self.ln2(out))    # Pre-norm: LN before FFN
+        return out
+```
 
 ---
 
 ## Limitations
 
-1. **Vocabulary Size**: With 2048 tokens, the model cannot represent highly specialized or rare words as single tokens. Increasing vocabulary size would improve this but requires more training data.
+1. **BPE Training Time**: The standard BPE algorithm iterates over the full corpus at each merge step, requiring 3-4 hours for vocabulary construction. This only runs once and is cached to checkpoint.
 
-2. **Context Length**: The 256-token context limits the model's ability to maintain coherence over very long passages. Extending context requires quadratically more memory for attention.
+2. **Vocabulary Size**: With 2048 tokens, the model cannot represent highly specialized or rare words as single tokens. Increasing vocabulary size would improve this but requires more training data.
 
-3. **Training Data**: 15M characters is relatively small for language models. Larger corpora would improve generation quality and diversity.
+3. **Context Length**: The 256-token context limits the model's ability to maintain coherence over very long passages. Extending context requires quadratically more memory for attention.
 
-4. **Single Author**: Training exclusively on Dickens creates a model specialized for Victorian prose. Generalization to other styles is limited.
+4. **Training Data**: 15M characters is relatively small for language models. Larger corpora would improve generation quality and diversity.
 
-5. **No Beam Search**: Generation uses simple multinomial sampling. Beam search or nucleus sampling could improve output quality.
+5. **Single Author**: Training exclusively on Dickens creates a model specialized for Victorian prose. Generalization to other styles is limited.
+
+6. **Sampling Strategy**: Generation uses simple multinomial sampling. Beam search or nucleus sampling could improve output quality.
+
+7. **No KV-Cache**: Generation recomputes attention for all previous tokens at each step. Implementing KV-cache would significantly speed up inference.
 
 ---
 
 ## Future Work
 
-- [ ] Implement nucleus (top-p) sampling for generation
-- [ ] Add beam search decoding option
+- [ ] Optimize BPE training using word frequency method (reduce from ~3.5h to ~5min)
+- [ ] Implement KV-cache for faster generation
+- [ ] Add nucleus (top-p) and top-k sampling options
+- [ ] Implement temperature scaling for generation diversity control
+- [ ] Add beam search decoding
 - [ ] Experiment with larger vocabulary sizes (4096, 8192)
 - [ ] Implement Flash Attention for memory efficiency
-- [ ] Extend context length with ALiBi or RoPE positional encodings
+- [ ] Extend context length with RoPE or ALiBi positional encodings
 - [ ] Train on larger, multi-author corpus
 - [ ] Add perplexity evaluation on held-out test set
-- [ ] Implement temperature scaling for generation diversity control
+- [ ] Implement mixed-precision training (fp16/bf16)
 
 ---
 
