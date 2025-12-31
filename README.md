@@ -124,16 +124,9 @@ The BPE tokenizer is implemented entirely from scratch, following the original a
 
 5. **Decoding**: Integer IDs are mapped back to tokens via the `i_2_st` dictionary, concatenated, and `</w>` is replaced with spaces.
 
-### Optimization: Word Frequency Method
+### Training Time
 
-The naive BPE implementation iterates over every word occurrence in the corpus (~3.5 million occurrences), which takes approximately 3.5 hours on standard hardware.
-
-Our optimized implementation:
-- Counts unique words (~38,000 unique words in Dickens corpus)
-- Stores word frequencies in a dictionary
-- Weights pair counts by word frequency during merge selection
-
-This reduces BPE training time from **~3.5 hours to ~5 minutes** while producing identical results.
+The BPE training iterates over the full corpus to count pair frequencies at each merge step. For the Dickens corpus (~3.5 million word occurrences), this takes approximately 3-4 hours on standard hardware. The encoded corpus is saved to checkpoint, so this only needs to run once.
 
 ### Post-Processing
 
