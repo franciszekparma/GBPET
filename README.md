@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/PyTorch-From%20Scratch-EE4C2C?style=flat-square&logo=pytorch">
   <img src="https://img.shields.io/badge/Parameters-~20M-blue?style=flat-square">
-  <img src="https://img.shields.io/badge/License-MIT-red?style=flat-square">
+  <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square">
 </p>
 
 ---
