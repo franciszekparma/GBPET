@@ -257,8 +257,18 @@ LR
 ## Results
 
 ### Sample Output
+```
+"Ah, my prayer," said I.
 
-> **TODO**: Add generated samples from trained model
+"Ada, my dear," said Caddy, "you are careful to speak of him?"
+
+"Never, my dear!" I repeated, hurriedly as she made this request,
+"don't brighten me any longer, but I don't know."
+
+"You must not say much."
+
+"See where you have said so?"
+```
 
 ```bash
 # Generate with:
