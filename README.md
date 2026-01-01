@@ -73,7 +73,7 @@ The model uses **Pre-LayerNorm** (GPT-2 style) where normalization is applied be
 ║                  TRANSFORMER BLOCK (×8)                      ║
 ║                                                              ║
 ║    LayerNorm → Multi-Head Attention (8 heads) → + Residual   ║
-║                           │                                  ║
+║                          │                                  ║
 ║    LayerNorm → FeedForward (512→2048→512, GELU) → + Residual ║
 ║                                                              ║
 ╚══════════════════════════╪═══════════════════════════════════╝
