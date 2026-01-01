@@ -60,9 +60,9 @@ The model uses **Pre-LayerNorm** (GPT-2 style) where normalization is applied be
 ### Architecture Diagram
 
 ```
-Input Token IDs
-       │
-       ▼
+                    Input Token IDs
+                           │
+                           ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  Token Embedding + Positional Embedding                      │
 │  nn.Embedding(2048, 512) + nn.Embedding(256, 512)            │
