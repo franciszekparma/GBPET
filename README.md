@@ -319,7 +319,7 @@ python transformer.py
 2. Radford et al. (2018). [Improving Language Understanding by Generative Pre-Training](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf)
 3. Radford et al. (2019). [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
 4. Sennrich et al. (2016). [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909)
-5. Karpathy, A. [nanoGPT]([https://github.com/karpathy/minGPT](https://github.com/karpathy/nanoGPT))
+5. A. Karpathy [nanoGPT](https://github.com/karpathy/nanoGPT)
 
 ---
 
