@@ -60,31 +60,31 @@ The model uses **Pre-LayerNorm** (GPT-2 style) where normalization is applied be
 ### Architecture Diagram
 
 ```
-                                            Input Token IDs
-                                                   │
-                                                   ▼
-                        ┌──────────────────────────────────────────────────────────────┐
-                        │  Token Embedding + Positional Embedding                      │
-                        │  nn.Embedding(2048, 512) + nn.Embedding(256, 512)            │
-                        └──────────────────────────┬───────────────────────────────────┘
-                                                   │
-                                                   ▼
-                        ╔══════════════════════════════════════════════════════════════╗
-                        ║                  TRANSFORMER BLOCK (×8)                      ║
-                        ║                                                              ║
-                        ║    LayerNorm → Multi-Head Attention (8 heads) → + Residual   ║
-                        ║                          │                                   ║
-                        ║    LayerNorm → FeedForward (512→2048→512, GELU) → + Residual ║
-                        ║                                                              ║
-                        ╚══════════════════════════╪═══════════════════════════════════╝
-                                                   │
-                                                   ▼
-                        ┌──────────────────────────────────────────────────────────────┐
-                        │              LayerNorm → Linear Head (512 → 2048)            │
-                        └──────────────────────────────────────────────────────────────┘
-                                                   │
-                                                   ▼
-                                             Output Logits
+                                                        Input Token IDs
+                                                               │
+                                                               ▼
+                                    ┌──────────────────────────────────────────────────────────────┐
+                                    │  Token Embedding + Positional Embedding                      │
+                                    │  nn.Embedding(2048, 512) + nn.Embedding(256, 512)            │
+                                    └──────────────────────────┬───────────────────────────────────┘
+                                                               │
+                                                               ▼
+                                    ╔══════════════════════════════════════════════════════════════╗
+                                    ║                  TRANSFORMER BLOCK (×8)                      ║
+                                    ║                                                              ║
+                                    ║    LayerNorm → Multi-Head Attention (8 heads) → + Residual   ║
+                                    ║                          │                                   ║
+                                    ║    LayerNorm → FeedForward (512→2048→512, GELU) → + Residual ║
+                                    ║                                                              ║
+                                    ╚══════════════════════════╪═══════════════════════════════════╝
+                                                               │
+                                                               ▼
+                                    ┌──────────────────────────────────────────────────────────────┐
+                                    │              LayerNorm → Linear Head (512 → 2048)            │
+                                    └──────────────────────────────────────────────────────────────┘
+                                                               │
+                                                               ▼
+                                                         Output Logits
 ```
 
 ---
